@@ -1,0 +1,35 @@
+services:
+  api:
+    build:
+      context: .
+    image: devops-fastapi-lab:local
+    init: true
+    restart: unless-stopped
+    environment:
+      APP_ENVIRONMENT: production
+      APP_DATABASE_PATH: /app/data/tasks.db
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - tasks-data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=2)"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    mem_limit: 256m
+    cpus: 0.50
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - backend
+
+volumes:
+  tasks-data:
+
+networks:
+  backend:
+    driver: bridge
