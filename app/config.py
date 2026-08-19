@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_name: str = "devops-fastapi-lab"
-    app_version: str = "0.2.1"
+    app_version: str = "0.2.2"
     environment: str = "development"
     database_path: Path = Path("data/tasks.db")
     api_key: str | None = None
