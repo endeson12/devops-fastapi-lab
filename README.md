@@ -6,7 +6,7 @@ Projeto-vitrine público e reproduzível de uma API FastAPI com práticas de ent
 
 ![Swagger UI da API em execução pública](docs/swagger-public-demo.png)
 
-### Evidências da release v0.2.1
+### Evidências da release v0.2.2
 
 | Verificação | Resultado reproduzido |
 |---|---|
@@ -71,7 +71,7 @@ Exemplo:
 ```bash
 curl -fsS -X POST http://localhost:8000/api/v1/tasks \
   -H 'Content-Type: application/json' \
-  -H "X-API-Key: ${APP_API_KEY}" \
+  -H "X-API-Key: $APP_API_KEY" \
   -H 'Idempotency-Key: release-2026-08-19' \
   -d '{"title":"Validar pipeline","completed":false}'
 ```
