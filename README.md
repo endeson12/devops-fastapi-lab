@@ -5,8 +5,12 @@ Projeto-vitrine público e reproduzível de uma API FastAPI com práticas de ent
 ## O que está incluído
 
 - CRUD de tarefas em SQLite e documentação OpenAPI em `/docs`;
-- probes separadas de liveness (`/health/live`) e readiness (`/health/ready`);
+- leitura pública e autenticação configurável por API key nas operações mutáveis;
+- probes separadas de liveness (`/health/live`) e readiness (`/readyz`);
+- request ID em toda resposta, logs de requisição em JSON e cabeçalhos HTTP defensivos;
+- criação idempotente opcional com `Idempotency-Key`;
 - métricas Prometheus em `/metrics`, com contagem e latência por rota normalizada;
+- Prometheus e dashboard Grafana provisionados localmente pelo Docker Compose;
 - testes com cobertura mínima de 90%, Ruff e mypy estrito;
 - contêiner não-root, capabilities removidas, healthcheck e limites no Compose;
 - CI para qualidade, imagem e scan Trivy; Dependabot para Python, Actions e Docker;
@@ -16,15 +20,21 @@ Projeto-vitrine público e reproduzível de uma API FastAPI com práticas de ent
 
 ```mermaid
 flowchart LR
-    C[Cliente] -->|HTTPS| N[Nginx / TLS]
-    N -->|HTTP localhost:8000| A[FastAPI + Uvicorn]
-    A --> D[(SQLite /app/data/tasks.db)]
-    P[Prometheus] -->|GET /metrics| A
-    A -->|stdout/stderr| L[Docker logs]
-    H[Docker healthcheck] -->|live/ready| A
+    C[Cliente] -->|HTTPS em deploy| N[Nginx / TLS]
+    N -->|HTTP :8000| M[Middleware: request ID, log JSON, headers]
+    M --> A[FastAPI]
+    A -->|GET público| Q[Consultas]
+    A -->|mutações + X-API-Key| W[Escritas]
+    W --> I[Idempotência transacional]
+    Q --> D[(SQLite + volume)]
+    I --> D
+    P[Prometheus] -->|scrape /metrics| M
+    G[Grafana] -->|PromQL| P
+    H[Healthcheck] -->|GET /readyz| M
+    M -->|JSON stdout| L[Docker logs]
 ```
 
-A aplicação usa um único processo Uvicorn porque SQLite serializa escritas e o volume é local. Para múltiplas réplicas, migre a persistência para PostgreSQL antes de escalar. O readiness confirma acesso ao banco; liveness apenas confirma que o processo HTTP responde. Labels das métricas usam o template da rota, evitando cardinalidade por ID.
+A aplicação usa um único processo Uvicorn porque SQLite serializa escritas e o volume é local. Para múltiplas réplicas, migre a persistência para PostgreSQL antes de escalar. O readiness executa `SELECT 1`; liveness apenas confirma que o processo HTTP responde. Labels das métricas usam o template da rota, evitando cardinalidade por ID. O Compose demonstra a pilha em uma máquina; não representa monitoramento externo ou alta disponibilidade.
 
 ## API
 
@@ -32,7 +42,8 @@ A aplicação usa um único processo Uvicorn porque SQLite serializa escritas e 
 |---|---|---|
 | `GET` | `/` | metadados e link da documentação |
 | `GET` | `/health/live` | vida do processo |
-| `GET` | `/health/ready` | prontidão e acesso ao SQLite |
+| `GET` | `/readyz` | prontidão e acesso ao SQLite |
+| `GET` | `/health/ready` | alias compatível de readiness |
 | `GET` | `/api/v1/tasks` | listar tarefas |
 | `POST` | `/api/v1/tasks` | criar tarefa |
 | `GET` | `/api/v1/tasks/{id}` | consultar tarefa |
@@ -45,7 +56,23 @@ Exemplo:
 ```bash
 curl -fsS -X POST http://localhost:8000/api/v1/tasks \
   -H 'Content-Type: application/json' \
+  -H "X-API-Key: ${APP_API_KEY}" \
+  -H 'Idempotency-Key: release-2026-08-19' \
   -d '{"title":"Validar pipeline","completed":false}'
+```
+
+`Idempotency-Key` é opcional e aceita até 200 caracteres. A primeira requisição cria a tarefa com `201`; repetir a mesma chave e payload devolve a resposta original com `Idempotency-Replayed: true`, sem nova linha. A mesma chave com outro payload retorna `409`. O registro usa o mesmo SQLite e entra nos backups existentes.
+
+## Autenticação e modos de execução
+
+Quando `APP_API_KEY` está definida, `POST`, `PATCH` e `DELETE` exigem `X-API-Key`; leituras, probes e métricas continuam públicas na aplicação. A comparação usa tempo constante. Proteja `/metrics` no proxy/rede quando necessário.
+
+Por padrão, a chave não existe e a autenticação de escrita fica **desabilitada** para desenvolvimento e testes. Não exponha esse modo à internet. O Compose declara produção e recusa iniciar sem a variável:
+
+```bash
+export APP_API_KEY="$(openssl rand -hex 32)"
+export GRAFANA_ADMIN_PASSWORD="$(openssl rand -hex 32)"
+docker compose up --build -d
 ```
 
 ## Desenvolvimento local
@@ -63,7 +90,7 @@ Com contêiner:
 
 ```bash
 make compose-up
-curl -fsS http://127.0.0.1:8000/health/ready
+curl -fsS http://127.0.0.1:8000/readyz
 docker compose ps
 make compose-down
 ```
@@ -73,7 +100,7 @@ O `uv.lock` torna o ambiente reproduzível e o `pyproject.toml` fixa versões di
 ## Decisões e limites
 
 - **SQLite:** reduz dependências e é adequado ao laboratório; o volume nomeado mantém os dados entre recriações. Não é indicado para escrita concorrente em várias réplicas.
-- **Sem autenticação:** mantém o exemplo focado em DevOps. Não exponha a API publicamente com dados sensíveis sem autenticação, autorização, rate limiting e revisão de ameaça.
+- **API key, não autorização por usuário:** adequada ao laboratório, mas não substitui identidade, rotação automatizada, rate limiting e revisão de ameaça.
 - **Métricas no processo:** suficientes para uma réplica. Em múltiplos workers, configure o modo multiprocess do cliente Prometheus ou use telemetria externa.
 - **CI sem publicação:** constrói e verifica localmente no runner; não envia imagens nem requer credenciais de registry.
 - **Imagem enxuta:** base slim, usuário UID/GID 10001 e apenas dependências de runtime. Tags de base são atualizadas pelo Dependabot; para ambientes controlados, aprove e fixe também o digest validado.
@@ -87,7 +114,7 @@ cd /opt/devops-fastapi-lab
 cp .env.example .env
 docker compose up --build -d
 docker compose ps
-curl -fsS http://127.0.0.1:8000/health/ready
+curl -fsS http://127.0.0.1:8000/readyz
 ```
 
 O Compose publica apenas em loopback. Exemplo `/etc/nginx/sites-available/devops-fastapi-lab`:
@@ -115,7 +142,9 @@ Atualização sugerida: gerar backup, buscar a versão revisada, executar `docke
 
 ## Observabilidade
 
-Configure Prometheus para coletar `http://api:8000/metrics` quando estiver na mesma rede, ou uma rota protegida via proxy. Alertas devem refletir objetivos definidos pelo operador, não valores copiados deste laboratório. Comece observando:
+O Compose provisiona Prometheus em `http://127.0.0.1:9090` e Grafana em `http://127.0.0.1:3000`. O datasource e o dashboard **FastAPI API overview** vêm de `observability/`; a senha Grafana vem de `GRAFANA_ADMIN_PASSWORD` (o fallback `admin` serve somente ao laboratório local). Gere tráfego e confirme o target no Prometheus antes de interpretar painéis vazios.
+
+Não há alertas ou SLOs pré-fabricados: limiares devem refletir objetivos reais do operador. O dashboard consulta somente séries expostas pela aplicação. Comece observando:
 
 - disponibilidade da probe de readiness;
 - taxa de respostas 5xx em `http_requests_total`;
@@ -123,7 +152,21 @@ Configure Prometheus para coletar `http://api:8000/metrics` quando estiver na me
 - reinícios, CPU, memória e espaço no volume;
 - erros e exceções em `docker compose logs`.
 
-Os logs do Uvicorn vão para stdout/stderr e podem ser coletados pelo driver Docker ou por um agente. Defina retenção/rotação no daemon para evitar esgotar disco. Este projeto não inclui dashboards nem afirma resultados de carga.
+Cada requisição gera uma linha JSON no logger `app.request`, com request ID, método, path, template de rota, status e duração observada. O Uvicorn roda sem access log duplicado no contêiner. Os logs seguem para stdout/stderr; defina retenção/rotação no daemon. O projeto não afirma resultados de carga, disponibilidade externa ou dados históricos.
+
+## Evidências reproduzíveis
+
+| Capacidade | Evidência no repositório | Como verificar |
+|---|---|---|
+| Auth em mutações e leitura pública | `require_api_key` e dependências em `app/main.py` | `uv run pytest tests/test_api.py` |
+| Request ID, logs JSON e headers | middleware `observe_request` | teste de log/cabeçalhos e `curl -i /health/live` |
+| Readiness do SQLite | `Database.is_ready` + `/readyz` | teste de falha simulada e healthcheck |
+| Idempotência | tabela `idempotency_keys` e transação SQLite | testes de replay, conflito e ausência de chave |
+| Métricas e dashboard | `observability/` e Compose | `docker compose config`, target e dashboard locais |
+| Backup/restore | scripts em `scripts/` | teste que restaura tarefas e idempotência |
+| Qualidade | `pyproject.toml` e CI | `ruff`, `mypy`, `pytest --cov`, `git diff --check` |
+
+A tabela aponta para artefatos e comandos, não para operação externa ou números de clientes.
 
 ## Backup e restauração
 
@@ -156,6 +199,14 @@ No volume Docker, copie o backup para um local temporário e execute a restaura�
 7. **Aprender:** documente causa, impacto, detecção, ações e itens preventivos sem culpabilização; transforme ações em issues com responsáveis.
 
 Se liveness falha, investigue processo/reinícios. Se apenas readiness falha, priorize arquivo, volume, permissões e integridade do SQLite. Se a latência cresce, verifique recursos, bloqueios de escrita e volume antes de reiniciar indiscriminadamente.
+
+## Roadmap honesto
+
+- migrar para PostgreSQL antes de múltiplas réplicas ou maior concorrência de escrita;
+- introduzir Alembic com essa migração e com conversão/rollback testados;
+- definir retenção de idempotência, rotação de segredos, SLOs e alertas a partir de requisitos reais.
+
+PostgreSQL e Alembic **não estão implementados** nesta evolução para evitar uma reescrita arriscada do fluxo SQLite e dos scripts de backup/restore.
 
 ## Segurança e contribuição
 
