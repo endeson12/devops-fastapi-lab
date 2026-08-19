@@ -6,11 +6,11 @@ Projeto-vitrine público e reproduzível de uma API FastAPI com práticas de ent
 
 ![Swagger UI da API em execução pública](docs/swagger-public-demo.png)
 
-### Evidências da release v0.2.0
+### Evidências da release v0.2.1
 
 | Verificação | Resultado reproduzido |
 |---|---|
-| Suite Python | 21 testes aprovados |
+| Suite Python | 12 testes aprovados, cobertura total de 96% |
 | Qualidade | Ruff e mypy aprovados |
 | Container | Imagem Docker construída e smoke test executado |
 | Segurança da API | POST sem chave `401`; com chave `201` |
