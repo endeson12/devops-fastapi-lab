@@ -2,6 +2,8 @@
 
 Projeto-vitrine público e reproduzível de uma API FastAPI com práticas de entrega, segurança, observabilidade e operação. É um laboratório demonstrativo: **não representa uma carga real de produção, não possui SLA e não publica métricas de desempenho inventadas**.
 
+> **Demonstração pública:** [Swagger UI](https://devops-lab.76-13-234-134.sslip.io/docs) · [Liveness](https://devops-lab.76-13-234-134.sslip.io/health/live) · endpoints de escrita protegidos por API key.
+
 ## O que está incluído
 
 - CRUD de tarefas em SQLite e documentação OpenAPI em `/docs`;
@@ -20,7 +22,7 @@ Projeto-vitrine público e reproduzível de uma API FastAPI com práticas de ent
 
 ```mermaid
 flowchart LR
-    C[Cliente] -->|HTTPS em deploy| N[Nginx / TLS]
+    C[Cliente] -->|HTTPS em deploy| N[Reverse proxy / TLS]
     N -->|HTTP :8000| M[Middleware: request ID, log JSON, headers]
     M --> A[FastAPI]
     A -->|GET público| Q[Consultas]
