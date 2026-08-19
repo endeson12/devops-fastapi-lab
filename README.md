@@ -4,6 +4,19 @@ Projeto-vitrine público e reproduzível de uma API FastAPI com práticas de ent
 
 > **Demonstração pública:** [Swagger UI](https://devops-lab.76-13-234-134.sslip.io/docs) · [Liveness](https://devops-lab.76-13-234-134.sslip.io/health/live) · endpoints de escrita protegidos por API key.
 
+![Swagger UI da API em execução pública](docs/swagger-public-demo.png)
+
+### Evidências da release v0.2.0
+
+| Verificação | Resultado reproduzido |
+|---|---|
+| Suite Python | 21 testes aprovados |
+| Qualidade | Ruff e mypy aprovados |
+| Container | Imagem Docker construída e smoke test executado |
+| Segurança da API | POST sem chave `401`; com chave `201` |
+| Idempotência | Repetição da mesma chave retorna o mesmo recurso |
+| Produção pública | HTTPS, Swagger e liveness respondendo `200` |
+
 ## O que está incluído
 
 - CRUD de tarefas em SQLite e documentação OpenAPI em `/docs`;
